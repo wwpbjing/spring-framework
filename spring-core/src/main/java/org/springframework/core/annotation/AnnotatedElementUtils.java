@@ -25,7 +25,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.core.BridgeMethodResolver;
-import org.springframework.core.annotation.MergedAnnotation.MapValues;
+import org.springframework.core.annotation.MergedAnnotation.Adapt;
 import org.springframework.core.annotation.MergedAnnotations.SearchStrategy;
 import org.springframework.lang.Nullable;
 import org.springframework.util.MultiValueMap;
@@ -500,11 +500,11 @@ public abstract class AnnotatedElementUtils {
 	public static MultiValueMap<String, Object> getAllAnnotationAttributes(AnnotatedElement element,
 			String annotationName, final boolean classValuesAsString, final boolean nestedAnnotationsAsMap) {
 
-		MapValues[] mapValues = MapValues.of(classValuesAsString, nestedAnnotationsAsMap);
+		Adapt[] adaptations = Adapt.values(classValuesAsString, nestedAnnotationsAsMap);
 		return getAnnotations(element).stream(annotationName)
-				.filter(MergedAnnotationPredicates.unique(AnnotatedElementUtils::parentAndType))
+				.filter(MergedAnnotationPredicates.unique(MergedAnnotation::getMetaTypes))
 				.map(MergedAnnotation::withNonMergedAttributes)
-				.collect(MergedAnnotationCollectors.toMultiValueMap(AnnotatedElementUtils::nullIfEmpty, mapValues));
+				.collect(MergedAnnotationCollectors.toMultiValueMap(AnnotatedElementUtils::nullIfEmpty, adaptations));
 	}
 
 	/**
@@ -775,13 +775,6 @@ public abstract class AnnotatedElementUtils {
 				repeatableContainers, AnnotationFilter.PLAIN);
 	}
 
-	private static Object parentAndType(MergedAnnotation<Annotation> annotation) {
-		if (annotation.getParent() == null) {
-			return annotation.getType().getName();
-		}
-		return annotation.getParent().getType().getName() + ":" + annotation.getParent().getType().getName();
-	}
-
 	@Nullable
 	private static MultiValueMap<String, Object> nullIfEmpty(MultiValueMap<String, Object> map) {
 		return (map.isEmpty() ? null : map);
@@ -799,8 +792,8 @@ public abstract class AnnotatedElementUtils {
 		if (!annotation.isPresent()) {
 			return null;
 		}
-		return annotation.asMap(mergedAnnotation -> new AnnotationAttributes(mergedAnnotation.getType()),
-				MapValues.of(classValuesAsString, nestedAnnotationsAsMap));
+		return annotation.asAnnotationAttributes(
+				Adapt.values(classValuesAsString, nestedAnnotationsAsMap));
 	}
 
 

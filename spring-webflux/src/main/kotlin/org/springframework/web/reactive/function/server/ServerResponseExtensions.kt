@@ -16,7 +16,10 @@
 
 package org.springframework.web.reactive.function.server
 
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactive.flow.asPublisher
 import org.reactivestreams.Publisher
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
@@ -41,15 +44,16 @@ inline fun <reified T : Any> ServerResponse.BodyBuilder.body(publisher: Publishe
  * @author Sebastien Deleuze
  * @since 5.0
  */
+@Deprecated("Use 'sse().body()' instead.")
 inline fun <reified T : Any> ServerResponse.BodyBuilder.bodyToServerSentEvents(publisher: Publisher<T>): Mono<ServerResponse> =
 		contentType(MediaType.TEXT_EVENT_STREAM).body(publisher, object : ParameterizedTypeReference<T>() {})
 
 /**
- * Shortcut for setting [MediaType.APPLICATION_JSON_UTF8] `Content-Type` header.
+ * Shortcut for setting [MediaType.APPLICATION_JSON] `Content-Type` header.
  * @author Sebastien Deleuze
  * @since 5.1
  */
-fun ServerResponse.BodyBuilder.json() = contentType(MediaType.APPLICATION_JSON_UTF8)
+fun ServerResponse.BodyBuilder.json() = contentType(MediaType.APPLICATION_JSON)
 
 /**
  * Shortcut for setting [MediaType.APPLICATION_XML] `Content-Type` header.
@@ -66,6 +70,13 @@ fun ServerResponse.BodyBuilder.xml() = contentType(MediaType.APPLICATION_XML)
 fun ServerResponse.BodyBuilder.html() = contentType(MediaType.TEXT_HTML)
 
 /**
+ * Shortcut for setting [MediaType.TEXT_EVENT_STREAM] `Content-Type` header.
+ * @author Sebastien Deleuze
+ * @since 5.2
+ */
+fun ServerResponse.BodyBuilder.sse() = contentType(MediaType.TEXT_EVENT_STREAM)
+
+/**
  * Coroutines variant of [ServerResponse.HeadersBuilder.build].
  *
  * @author Sebastien Deleuze
@@ -75,6 +86,18 @@ suspend fun ServerResponse.HeadersBuilder<out ServerResponse.HeadersBuilder<*>>.
 		build().awaitSingle()
 
 /**
+ * Coroutines [Flow] based extension for [ServerResponse.BodyBuilder.body] providing a
+ * `bodyFlowAndAwait(Flow<T>)` variant. This extension is not subject to type erasure and retains
+ * actual generic type arguments.
+ *
+ * @author Sebastien Deleuze
+ * @since 5.2
+ */
+@FlowPreview
+suspend inline fun <reified T : Any> ServerResponse.BodyBuilder.bodyFlowAndAwait(flow: Flow<T>): ServerResponse =
+		body(flow.asPublisher(), object : ParameterizedTypeReference<T>() {}).awaitSingle()
+
+/**
  * Coroutines variant of [ServerResponse.BodyBuilder.syncBody].
  *
  * @author Sebastien Deleuze
@@ -82,7 +105,6 @@ suspend fun ServerResponse.HeadersBuilder<out ServerResponse.HeadersBuilder<*>>.
  */
 suspend fun ServerResponse.BodyBuilder.bodyAndAwait(body: Any): ServerResponse =
 		syncBody(body).awaitSingle()
-
 
 /**
  * Coroutines variant of [ServerResponse.BodyBuilder.syncBody] without the sync prefix since it is ok to use it within

@@ -41,38 +41,45 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeType;
-import org.springframework.util.MimeTypeUtils;
-import org.springframework.util.StringUtils;
+import org.springframework.util.RouteMatcher;
 
 /**
- * Implementation of {@link RSocket} that wraps incoming requests with a
- * {@link Message}, delegates to a {@link Function} for handling, and then
- * obtains the response from a "reply" header.
+ * Responder {@link RSocket} that wraps the payload and metadata of incoming
+ * requests as a {@link Message} and then delegates to the configured
+ * {@link RSocketMessageHandler} to handle it. The response, if applicable, is
+ * obtained from the {@link RSocketPayloadReturnValueHandler#RESPONSE_HEADER
+ * "rsocketResponse"} header.
  *
  * @author Rossen Stoyanchev
  * @since 5.2
  */
 class MessagingRSocket extends AbstractRSocket {
 
-	private final Function<Message<?>, Mono<Void>> handler;
+	private final RSocketMessageHandler messageHandler;
+
+	private final RouteMatcher routeMatcher;
 
 	private final RSocketRequester requester;
 
 	@Nullable
 	private MimeType dataMimeType;
 
-	private final RSocketStrategies strategies;
+	private final DataBufferFactory bufferFactory;
 
 
-	MessagingRSocket(Function<Message<?>, Mono<Void>> handler, RSocket sendingRSocket,
-			@Nullable MimeType defaultDataMimeType, RSocketStrategies strategies) {
+	MessagingRSocket(RSocketMessageHandler messageHandler, RouteMatcher routeMatcher,
+			RSocketRequester requester, @Nullable MimeType defaultDataMimeType,
+			DataBufferFactory bufferFactory) {
 
-		Assert.notNull(handler, "'handler' is required");
-		Assert.notNull(sendingRSocket, "'sendingRSocket' is required");
-		this.handler = handler;
-		this.requester = RSocketRequester.create(sendingRSocket, defaultDataMimeType, strategies);
+		Assert.notNull(messageHandler, "'messageHandler' is required");
+		Assert.notNull(routeMatcher, "'routeMatcher' is required");
+		Assert.notNull(requester, "'requester' is required");
+
+		this.messageHandler = messageHandler;
+		this.routeMatcher = routeMatcher;
+		this.requester = requester;
 		this.dataMimeType = defaultDataMimeType;
-		this.strategies = strategies;
+		this.bufferFactory = bufferFactory;
 	}
 
 
@@ -83,9 +90,6 @@ class MessagingRSocket extends AbstractRSocket {
 	 * @return completion handle for success or error
 	 */
 	public Mono<Void> handleConnectionSetupPayload(ConnectionSetupPayload payload) {
-		if (StringUtils.hasText(payload.dataMimeType())) {
-			this.dataMimeType = MimeTypeUtils.parseMimeType(payload.dataMimeType());
-		}
 		// frameDecoder does not apply to connectionSetupPayload
 		// so retain here since handle expects it..
 		payload.retain();
@@ -130,7 +134,7 @@ class MessagingRSocket extends AbstractRSocket {
 		DataBuffer dataBuffer = retainDataAndReleasePayload(payload);
 		int refCount = refCount(dataBuffer);
 		Message<?> message = MessageBuilder.createMessage(dataBuffer, headers);
-		return Mono.defer(() -> this.handler.apply(message))
+		return Mono.defer(() -> this.messageHandler.handleMessage(message))
 				.doFinally(s -> {
 					if (refCount(dataBuffer) == refCount) {
 						DataBufferUtils.release(dataBuffer);
@@ -152,7 +156,7 @@ class MessagingRSocket extends AbstractRSocket {
 		Flux<DataBuffer> buffers = payloads.map(this::retainDataAndReleasePayload).doOnSubscribe(s -> read.set(true));
 		Message<Flux<DataBuffer>> message = MessageBuilder.createMessage(buffers, headers);
 
-		return Mono.defer(() -> this.handler.apply(message))
+		return Mono.defer(() -> this.messageHandler.handleMessage(message))
 				.doFinally(s -> {
 					// Subscription should have happened by now due to ChannelSendOperator
 					if (!read.get()) {
@@ -175,12 +179,14 @@ class MessagingRSocket extends AbstractRSocket {
 	}
 
 	private DataBuffer retainDataAndReleasePayload(Payload payload) {
-		return PayloadUtils.retainDataAndReleasePayload(payload, this.strategies.dataBufferFactory());
+		return PayloadUtils.retainDataAndReleasePayload(payload, this.bufferFactory);
 	}
 
 	private MessageHeaders createHeaders(String destination, @Nullable MonoProcessor<?> replyMono) {
 		MessageHeaderAccessor headers = new MessageHeaderAccessor();
-		headers.setHeader(DestinationPatternsMessageCondition.LOOKUP_DESTINATION_HEADER, destination);
+		headers.setLeaveMutable(true);
+		RouteMatcher.Route route = this.routeMatcher.parseRoute(destination);
+		headers.setHeader(DestinationPatternsMessageCondition.LOOKUP_DESTINATION_HEADER, route);
 		if (this.dataMimeType != null) {
 			headers.setContentType(this.dataMimeType);
 		}
@@ -188,8 +194,7 @@ class MessagingRSocket extends AbstractRSocket {
 		if (replyMono != null) {
 			headers.setHeader(RSocketPayloadReturnValueHandler.RESPONSE_HEADER, replyMono);
 		}
-		DataBufferFactory bufferFactory = this.strategies.dataBufferFactory();
-		headers.setHeader(HandlerMethodReturnValueHandler.DATA_BUFFER_FACTORY_HEADER, bufferFactory);
+		headers.setHeader(HandlerMethodReturnValueHandler.DATA_BUFFER_FACTORY_HEADER, this.bufferFactory);
 		return headers.getMessageHeaders();
 	}
 

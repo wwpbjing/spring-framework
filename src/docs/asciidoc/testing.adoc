@@ -77,11 +77,15 @@ out-of-container tests for code that depends on environment-specific properties.
 [[mock-objects-jndi]]
 ==== JNDI
 
-The `org.springframework.mock.jndi` package contains an implementation of the JNDI SPI,
-which you can use to set up a simple JNDI environment for test suites or stand-alone
+The `org.springframework.mock.jndi` package contains a partial implementation of the JNDI
+SPI, which you can use to set up a simple JNDI environment for test suites or stand-alone
 applications. If, for example, JDBC `DataSource` instances get bound to the same JNDI
 names in test code as they do in a Java EE container, you can reuse both application code
 and configuration in testing scenarios without modification.
+
+WARNING: The mock JNDI support in the `org.springframework.mock.jndi` package is
+officially deprecated as of Spring Framework 5.2 in favor of complete solutions from third
+parties such as https://github.com/h-thurow/Simple-JNDI[Simple-JNDI].
 
 
 [[mock-objects-servlet]]
@@ -1185,6 +1189,7 @@ The following annotations are supported only when used in conjunction with the
 
 * <<integration-testing-annotations-junit-jupiter-springjunitconfig>>
 * <<integration-testing-annotations-junit-jupiter-springjunitwebconfig>>
+* <<integration-testing-annotations-testconstructor>>
 * <<integration-testing-annotations-junit-jupiter-enabledif>>
 * <<integration-testing-annotations-junit-jupiter-disabledif>>
 
@@ -1276,6 +1281,35 @@ See <<testcontext-ctx-management>> as well as the javadoc for
 {api-spring-framework}/test/context/ContextConfiguration.html[`@ContextConfiguration`], and
 {api-spring-framework}/test/context/web/WebAppConfiguration.html[`@WebAppConfiguration`]
 for further details.
+
+[[integration-testing-annotations-testconstructor]]
+===== `@TestConstructor`
+
+`@TestConstructor` is a type-level annotation that is used to configure whether a test
+class constructor should be automatically autowired from components in the test's
+`ApplicationContext`.
+
+If `@TestConstructor` is not present or meta-present on a test class, the default _test
+constructor autowire_ mode will be used. See the tip below for details on how to change
+the default mode. Note, however, that a local declaration of `@Autowired` on a
+constructor takes precedence over both `@TestConstructor` and the default mode.
+
+.Configuring the default test constructor autowire mode
+[TIP]
+=====
+The default _test constructor autowire_ mode can be configured by setting the
+`spring.test.constructor.autowire` JVM system property to `true`. Alternatively, the
+default mode may be configured via the `SpringProperties` mechanism.
+
+If the `spring.test.constructor.autowire` property is not set, test class constructors
+will not be automatically autowired.
+=====
+
+NOTE: As of Spring Framework 5.2, `@TestConstructor` is only supported in conjunction
+with the `SpringExtension` for use with JUnit Jupiter. Note that the `SpringExtension` is
+often automatically registered for you – for example, when using annotations such as
+`@SpringJUnitConfig` and `@SpringJUnitWebConfig` or various test-related annotations from
+Spring Boot Test.
 
 [[integration-testing-annotations-junit-jupiter-enabledif]]
 ===== `@EnabledIf`
@@ -1382,6 +1416,7 @@ You can use each of the following as a meta-annotation in conjunction with the
 * `@ProfileValueSourceConfiguration` _(only supported on JUnit 4)_
 * `@SpringJUnitConfig` _(only supported on JUnit Jupiter)_
 * `@SpringJUnitWebConfig` _(only supported on JUnit Jupiter)_
+* `@TestConstructor` _(only supported on JUnit Jupiter)_
 * `@EnabledIf` _(only supported on JUnit Jupiter)_
 * `@DisabledIf` _(only supported on JUnit Jupiter)_
 
@@ -1673,27 +1708,28 @@ by default, exactly in the following order:
   default rollback semantics.
 * `SqlScriptsTestExecutionListener`: Runs SQL scripts configured by using the `@Sql`
   annotation.
+* `EventPublishingTestExecutionListener`: Publishes test execution events to the test's
+  `ApplicationContext` (see <<testcontext-test-execution-events>>).
 
 [[testcontext-tel-config-registering-tels]]
-===== Registering Custom `TestExecutionListener` Implementations
+===== Registering `TestExecutionListener` Implementations
 
-You can register custom `TestExecutionListener` implementations for a test class
-and its subclasses by using the `@TestExecutionListeners` annotation.
-See <<integration-testing-annotations, annotation support>> and the javadoc for
+You can register `TestExecutionListener` implementations for a test class and its
+subclasses by using the `@TestExecutionListeners` annotation. See
+<<integration-testing-annotations, annotation support>> and the javadoc for
 {api-spring-framework}/test/context/TestExecutionListeners.html[`@TestExecutionListeners`]
 for details and examples.
 
 [[testcontext-tel-config-automatic-discovery]]
 ===== Automatic Discovery of Default `TestExecutionListener` Implementations
 
-Registering custom `TestExecutionListener` implementations by using
-`@TestExecutionListeners` is suitable for custom listeners that are used in limited
-testing scenarios. However, it can become cumbersome if a custom listener needs to be
-used across a test suite. Since Spring Framework 4.1, this issue is addressed through
-support for automatic discovery of default `TestExecutionListener` implementations
-through the `SpringFactoriesLoader` mechanism.
+Registering `TestExecutionListener` implementations by using `@TestExecutionListeners` is
+suitable for custom listeners that are used in limited testing scenarios. However, it can
+become cumbersome if a custom listener needs to be used across a test suite. Since Spring
+Framework 4.1, this issue is addressed through support for automatic discovery of default
+`TestExecutionListener` implementations through the `SpringFactoriesLoader` mechanism.
 
-Specifically, the `spring-test` module declares all core default TestExecutionListener`
+Specifically, the `spring-test` module declares all core default `TestExecutionListener`
 implementations under the `org.springframework.test.context.TestExecutionListener` key in
 its `META-INF/spring.factories` properties file. Third-party frameworks and developers
 can contribute their own `TestExecutionListener` implementations to the list of default
@@ -1779,6 +1815,69 @@ be replaced with the following:
 		// class body...
 	}
 ----
+
+[[testcontext-test-execution-events]]
+==== Test Execution Events
+
+The `EventPublishingTestExecutionListener` introduced in Spring Framework 5.2 offers an
+alternative approach to implementing a custom `TestExecutionListener`. Components in the
+test's `ApplicationContext` can listen to the following events published by the
+`EventPublishingTestExecutionListener`, each of which corresponds to a method in the
+`TestExecutionListener` API.
+
+* `BeforeTestClassEvent`
+* `PrepareTestInstanceEvent`
+* `BeforeTestMethodEvent`
+* `BeforeTestExecutionEvent`
+* `AfterTestExecutionEvent`
+* `AfterTestMethodEvent`
+* `AfterTestClassEvent`
+
+NOTE: These events are only published if the `ApplicationContext` has already been loaded.
+
+These events may be consumed for various reasons, such as resetting mock beans or tracing
+test execution. One advantage of consuming test execution events rather than implementing
+a custom `TestExecutionListener` is that test execution events may be consumed by any
+Spring bean registered in the test `ApplicationContext`, and such beans may benefit
+directly from dependency injection and other features of the `ApplicationContext`. In
+contrast, a `TestExecutionListener` is not a bean in the `ApplicationContext`.
+
+In order to listen to test execution events, a Spring bean may choose to implement the
+`org.springframework.context.ApplicationListener` interface. Alternatively, listener
+methods can be annotated with `@EventListener` and configured to listen to one of the
+particular event types listed above (see
+<<core.adoc#context-functionality-events-annotation, Annotation-based Event Listeners>>).
+Due to the popularity of this approach, Spring provides the following dedicated
+`@EventListener` annotations to simplify registration of test execution event listeners.
+These annotations reside in the `org.springframework.test.context.event.annotation`
+package.
+
+* `@BeforeTestClass`
+* `@PrepareTestInstance`
+* `@BeforeTestMethod`
+* `@BeforeTestExecution`
+* `@AfterTestExecution`
+* `@AfterTestMethod`
+* `@AfterTestClass`
+
+[[testcontext-test-execution-events-exception-handling]]
+===== Exception Handling
+
+By default, if a test execution event listener throws an exception while consuming an
+event, that exception will propagate to the underlying testing framework in use (such as
+JUnit or TestNG). For example, if the consumption of a `BeforeTestMethodEvent` results in
+an exception, the corresponding test method will fail as a result of the exception. In
+contrast, if an asynchronous test execution event listener throws an exception, the
+exception will not propagate to the underlying testing framework. For further details on
+asynchronous exception handling, consult the class-level javadoc for `@EventListener`.
+
+[[testcontext-test-execution-events-async]]
+===== Asynchronous Listeners
+
+If you want a particular test execution event listener to process events asynchronously,
+you can use Spring's <<integration.adoc#scheduling-annotation-support-async,regular
+`@Async` support>>. For further details, consult the class-level javadoc for
+`@EventListener`.
 
 
 [[testcontext-ctx-management]]
@@ -4355,15 +4454,25 @@ Specifically, `SpringExtension` can inject dependencies from the test's
 [[testcontext-junit-jupiter-di-constructor]]
 ====== Constructor Injection
 
-If a parameter in a constructor for a JUnit Jupiter test class is of type
+If a specific parameter in a constructor for a JUnit Jupiter test class is of type
 `ApplicationContext` (or a sub-type thereof) or is annotated or meta-annotated with
 `@Autowired`, `@Qualifier`, or `@Value`, Spring injects the value for that specific
-parameter with the corresponding bean from the test's `ApplicationContext`. You can also
-directly annotate a test constructor with `@Autowired` if all of the parameters should be
-supplied by Spring.
+parameter with the corresponding bean or value from the test's `ApplicationContext`.
 
-WARNING: If the constructor for a test class is itself annotated with `@Autowired`,
-Spring assumes the responsibility for resolving _all_ parameters in the constructor.
+Spring can also be configured to autowire all arguments for a test class constructor if
+the constructor is considered to be _autowirable_. A constructor is considered to be
+autowirable if one of the following conditions is met (in order of precedence).
+
+* The constructor is annotated with `@Autowired`.
+* `@TestConstructor` is present or meta-present on the test class with the `autowire`
+  attribute set to `true`.
+* The default _test constructor autowire_ mode is set to `true`.
+
+See <<integration-testing-annotations-testconstructor>> for details on the use of
+`@TestConstructor` and how to set the global _test constructor autowire_ mode.
+
+WARNING: If the constructor for a test class is considered to be _autowirable_, Spring
+assumes the responsibility for resolving arguments for all parameters in the constructor.
 Consequently, no other `ParameterResolver` registered with JUnit Jupiter can resolve
 parameters for such a constructor.
 
@@ -4408,6 +4517,26 @@ In the following example, Spring injects the `OrderService` bean from the
 ----
 
 Note that this feature lets test dependencies be `final` and therefore immutable.
+
+If the `spring.test.constructor.autowire` property is to `true` (see
+<<integration-testing-annotations-testconstructor>>), we can omit the declaration of
+`@Autowired` on the constructor in the previous example resulting in the following.
+
+[source,java,indent=0]
+[subs="verbatim,quotes"]
+----
+	@SpringJUnitConfig(TestConfig.class)
+	class OrderServiceIntegrationTests {
+
+		private final OrderService orderService;
+
+		OrderServiceIntegrationTests(OrderService orderService) {
+			this.orderService = orderService.
+		}
+
+		// tests that use the injected OrderService
+	}
+----
 
 [[testcontext-junit-jupiter-di-method]]
 ====== Method Injection

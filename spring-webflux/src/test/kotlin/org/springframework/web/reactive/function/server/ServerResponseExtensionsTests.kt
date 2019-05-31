@@ -19,6 +19,8 @@ package org.springframework.web.reactive.function.server
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -45,16 +47,9 @@ class ServerResponseExtensionsTests {
 	}
 
 	@Test
-	fun `BodyBuilder#bodyToServerSentEvents with Publisher and reified type parameters`() {
-		val body = mockk<Publisher<List<Foo>>>()
-		bodyBuilder.bodyToServerSentEvents(body)
-		verify { bodyBuilder.contentType(TEXT_EVENT_STREAM) }
-	}
-
-	@Test
 	fun `BodyBuilder#json`() {
 		bodyBuilder.json()
-		verify { bodyBuilder.contentType(APPLICATION_JSON_UTF8) }
+		verify { bodyBuilder.contentType(APPLICATION_JSON) }
 	}
 
 	@Test
@@ -67,6 +62,12 @@ class ServerResponseExtensionsTests {
 	fun `BodyBuilder#html`() {
 		bodyBuilder.html()
 		verify { bodyBuilder.contentType(TEXT_HTML) }
+	}
+
+	@Test
+	fun `BodyBuilder#sse`() {
+		bodyBuilder.sse()
+		verify { bodyBuilder.contentType(TEXT_EVENT_STREAM) }
 	}
 
 	@Test
@@ -90,6 +91,18 @@ class ServerResponseExtensionsTests {
 		verify {
 			bodyBuilder.syncBody(ofType<String>())
 		}
+	}
+
+	@Test
+	@FlowPreview
+	fun bodyFlowAndAwait() {
+		val response = mockk<ServerResponse>()
+		val body = mockk<Flow<List<Foo>>>()
+		every { bodyBuilder.body(ofType<Publisher<List<Foo>>>()) } returns Mono.just(response)
+		runBlocking {
+			bodyBuilder.bodyFlowAndAwait(body)
+		}
+		verify { bodyBuilder.body(ofType<Publisher<List<Foo>>>(), object : ParameterizedTypeReference<List<Foo>>() {}) }
 	}
 
 	@Test
