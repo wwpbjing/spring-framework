@@ -27,8 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -40,6 +40,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.ClientHttpRequest;
 import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpRequestInitializer;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.http.converter.GenericHttpMessageConverter;
@@ -49,6 +50,7 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -65,9 +67,12 @@ import static org.springframework.http.HttpMethod.PUT;
 import static org.springframework.http.MediaType.parseMediaType;
 
 /**
+ * Unit tests for {@link RestTemplate}.
+ *
  * @author Arjen Poutsma
  * @author Rossen Stoyanchev
  * @author Brian Clozel
+ * @author Sam Brannen
  */
 @SuppressWarnings("unchecked")
 public class RestTemplateTests {
@@ -86,7 +91,7 @@ public class RestTemplateTests {
 	private HttpMessageConverter converter;
 
 
-	@Before
+	@BeforeEach
 	public void setup() {
 		requestFactory = mock(ClientHttpRequestFactory.class);
 		request = mock(ClientHttpRequest.class);
@@ -98,6 +103,25 @@ public class RestTemplateTests {
 		template.setErrorHandler(errorHandler);
 	}
 
+	@Test
+	public void constructorPreconditions() {
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> new RestTemplate((List<HttpMessageConverter<?>>) null))
+				.withMessage("At least one HttpMessageConverter is required");
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> new RestTemplate(Arrays.asList(null, this.converter)))
+				.withMessage("The HttpMessageConverter list must not contain null elements");
+	}
+
+	@Test
+	public void setMessageConvertersPreconditions() {
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> template.setMessageConverters((List<HttpMessageConverter<?>>) null))
+				.withMessage("At least one HttpMessageConverter is required");
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> template.setMessageConverters(Arrays.asList(null, this.converter)))
+				.withMessage("The HttpMessageConverter list must not contain null elements");
+	}
 
 	@Test
 	public void varArgsTemplateVariables() throws Exception {
@@ -652,6 +676,32 @@ public class RestTemplateTests {
 		HttpEntity<String> entity = new HttpEntity<>("Hello World", entityHeaders);
 		template.exchange("https://example.com", POST, entity, Void.class);
 		assertThat(requestHeaders.get("MyHeader")).contains("MyEntityValue", "MyInterceptorValue");
+
+		verify(response).close();
+	}
+
+	@Test
+	public void clientHttpRequestInitializerAndRequestInterceptorAreBothApplied() throws Exception {
+		ClientHttpRequestInitializer initializer = request ->
+			request.getHeaders().add("MyHeader", "MyInitializerValue");
+		ClientHttpRequestInterceptor interceptor = (request, body, execution) -> {
+			request.getHeaders().add("MyHeader", "MyInterceptorValue");
+			return execution.execute(request, body);
+		};
+		template.setClientHttpRequestInitializers(Collections.singletonList(initializer));
+		template.setInterceptors(Collections.singletonList(interceptor));
+
+		MediaType contentType = MediaType.TEXT_PLAIN;
+		given(converter.canWrite(String.class, contentType)).willReturn(true);
+		HttpHeaders requestHeaders = new HttpHeaders();
+		mockSentRequest(POST, "https://example.com", requestHeaders);
+		mockResponseStatus(HttpStatus.OK);
+
+		HttpHeaders entityHeaders = new HttpHeaders();
+		entityHeaders.setContentType(contentType);
+		HttpEntity<String> entity = new HttpEntity<>("Hello World", entityHeaders);
+		template.exchange("https://example.com", POST, entity, Void.class);
+		assertThat(requestHeaders.get("MyHeader")).contains("MyInterceptorValue", "MyInitializerValue");
 
 		verify(response).close();
 	}

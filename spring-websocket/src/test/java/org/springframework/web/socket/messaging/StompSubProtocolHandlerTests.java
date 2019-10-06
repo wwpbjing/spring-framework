@@ -25,8 +25,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
@@ -87,7 +87,7 @@ public class StompSubProtocolHandlerTests {
 	private ArgumentCaptor<Message> messageCaptor;
 
 
-	@Before
+	@BeforeEach
 	public void setup() {
 		this.protocolHandler = new StompSubProtocolHandler();
 		this.channel = Mockito.mock(MessageChannel.class);
@@ -383,6 +383,15 @@ public class StompSubProtocolHandlerTests {
 		Principal user = SimpMessageHeaderAccessor.getUser(message.getHeaders());
 		assertThat(user).isNotNull();
 		assertThat(user.getName()).isEqualTo("__pete__@gmail.com");
+
+		StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECTED);
+		message = MessageBuilder.createMessage(EMPTY_PAYLOAD, accessor.getMessageHeaders());
+		handler.handleMessageToClient(this.session, message);
+
+		assertThat(this.session.getSentMessages()).hasSize(1);
+		WebSocketMessage<?> textMessage = this.session.getSentMessages().get(0);
+		assertThat(textMessage.getPayload())
+				.isEqualTo("CONNECTED\n" + "user-name:__pete__@gmail.com\n" + "\n" + "\u0000");
 	}
 
 	@Test

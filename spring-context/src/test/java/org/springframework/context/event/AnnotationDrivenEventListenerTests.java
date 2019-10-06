@@ -25,13 +25,17 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
 import javax.annotation.PostConstruct;
 
-import org.junit.After;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import org.springframework.aop.framework.Advised;
 import org.springframework.aop.support.AopUtils;
@@ -61,6 +65,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
+import org.springframework.util.concurrent.SettableListenableFuture;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.validation.beanvalidation.MethodValidationPostProcessor;
 
@@ -81,7 +86,7 @@ public class AnnotationDrivenEventListenerTests {
 	private CountDownLatch countDownLatch;  // 1 call by default
 
 
-	@After
+	@AfterEach
 	public void closeContext() {
 		if (this.context != null) {
 			this.context.close();
@@ -243,7 +248,69 @@ public class AnnotationDrivenEventListenerTests {
 	}
 
 	@Test
-	public void eventListenerWorksWithSimpleInterfaceProxy() throws Exception {
+	public void listenableFutureReply() {
+		load(TestEventListener.class, ReplyEventListener.class);
+		SettableListenableFuture<String> future = new SettableListenableFuture<>();
+		future.set("dummy");
+		AnotherTestEvent event = new AnotherTestEvent(this, future);
+		ReplyEventListener replyEventListener = this.context.getBean(ReplyEventListener.class);
+		TestEventListener listener = this.context.getBean(TestEventListener.class);
+
+		this.eventCollector.assertNoEventReceived(listener);
+		this.eventCollector.assertNoEventReceived(replyEventListener);
+		this.context.publishEvent(event);
+		this.eventCollector.assertEvent(replyEventListener, event);
+		this.eventCollector.assertEvent(listener, "dummy"); // reply
+		this.eventCollector.assertTotalEventsCount(2);
+	}
+
+	@Test
+	public void completableFutureReply() {
+		load(TestEventListener.class, ReplyEventListener.class);
+		AnotherTestEvent event = new AnotherTestEvent(this, CompletableFuture.completedFuture("dummy"));
+		ReplyEventListener replyEventListener = this.context.getBean(ReplyEventListener.class);
+		TestEventListener listener = this.context.getBean(TestEventListener.class);
+
+		this.eventCollector.assertNoEventReceived(listener);
+		this.eventCollector.assertNoEventReceived(replyEventListener);
+		this.context.publishEvent(event);
+		this.eventCollector.assertEvent(replyEventListener, event);
+		this.eventCollector.assertEvent(listener, "dummy"); // reply
+		this.eventCollector.assertTotalEventsCount(2);
+	}
+
+	@Test
+	public void monoReply() {
+		load(TestEventListener.class, ReplyEventListener.class);
+		AnotherTestEvent event = new AnotherTestEvent(this, Mono.just("dummy"));
+		ReplyEventListener replyEventListener = this.context.getBean(ReplyEventListener.class);
+		TestEventListener listener = this.context.getBean(TestEventListener.class);
+
+		this.eventCollector.assertNoEventReceived(listener);
+		this.eventCollector.assertNoEventReceived(replyEventListener);
+		this.context.publishEvent(event);
+		this.eventCollector.assertEvent(replyEventListener, event);
+		this.eventCollector.assertEvent(listener, "dummy"); // reply
+		this.eventCollector.assertTotalEventsCount(2);
+	}
+
+	@Test
+	public void fluxReply() {
+		load(TestEventListener.class, ReplyEventListener.class);
+		AnotherTestEvent event = new AnotherTestEvent(this, Flux.just("dummy1", "dummy2"));
+		ReplyEventListener replyEventListener = this.context.getBean(ReplyEventListener.class);
+		TestEventListener listener = this.context.getBean(TestEventListener.class);
+
+		this.eventCollector.assertNoEventReceived(listener);
+		this.eventCollector.assertNoEventReceived(replyEventListener);
+		this.context.publishEvent(event);
+		this.eventCollector.assertEvent(replyEventListener, event);
+		this.eventCollector.assertEvent(listener, "dummy1", "dummy2"); // reply
+		this.eventCollector.assertTotalEventsCount(3);
+	}
+
+	@Test
+	public void eventListenerWorksWithSimpleInterfaceProxy() {
 		load(ScopedProxyTestBean.class);
 
 		SimpleService proxy = this.context.getBean(SimpleService.class);
@@ -260,7 +327,7 @@ public class AnnotationDrivenEventListenerTests {
 	}
 
 	@Test
-	public void eventListenerWorksWithAnnotatedInterfaceProxy() throws Exception {
+	public void eventListenerWorksWithAnnotatedInterfaceProxy() {
 		load(AnnotatedProxyTestBean.class);
 
 		AnnotatedSimpleService proxy = this.context.getBean(AnnotatedSimpleService.class);
@@ -277,7 +344,7 @@ public class AnnotationDrivenEventListenerTests {
 	}
 
 	@Test
-	public void eventListenerWorksWithCglibProxy() throws Exception {
+	public void eventListenerWorksWithCglibProxy() {
 		load(CglibProxyTestBean.class);
 
 		CglibProxyTestBean proxy = this.context.getBean(CglibProxyTestBean.class);
@@ -294,14 +361,14 @@ public class AnnotationDrivenEventListenerTests {
 	}
 
 	@Test
-	public void privateMethodOnCglibProxyFails() throws Exception {
+	public void privateMethodOnCglibProxyFails() {
 		assertThatExceptionOfType(BeanInitializationException.class).isThrownBy(() ->
 				load(CglibProxyWithPrivateMethod.class))
 			.withCauseInstanceOf(IllegalStateException.class);
 	}
 
 	@Test
-	public void eventListenerWorksWithCustomScope() throws Exception {
+	public void eventListenerWorksWithCustomScope() {
 		load(CustomScopeTestBean.class);
 		CustomScope customScope = new CustomScope();
 		this.context.getBeanFactory().registerScope("custom", customScope);
@@ -547,7 +614,7 @@ public class AnnotationDrivenEventListenerTests {
 		assertThat(listener.order).contains("first", "second", "third");
 	}
 
-	@Test @Ignore  // SPR-15122
+	@Test @Disabled  // SPR-15122
 	public void listenersReceiveEarlyEvents() {
 		load(EventOnPostConstruct.class, OrderedTestListener.class);
 		OrderedTestListener listener = this.context.getBean(OrderedTestListener.class);
@@ -774,6 +841,7 @@ public class AnnotationDrivenEventListenerTests {
 			this.eventCollector.addEvent(this, event);
 		}
 
+		@Override
 		@EventListener
 		@Async
 		public void handleAsync(AnotherTestEvent event) {
@@ -800,6 +868,7 @@ public class AnnotationDrivenEventListenerTests {
 			this.eventCollector.addEvent(this, event);
 		}
 
+		@Override
 		@EventListener
 		@Async
 		public void handleAsync(AnotherTestEvent event) {
@@ -922,11 +991,13 @@ public class AnnotationDrivenEventListenerTests {
 			super.handleString(payload);
 		}
 
+		@Override
 		@ConditionalEvent("#root.event.timestamp > #p0")
 		public void handleTimestamp(Long timestamp) {
 			collectEvent(timestamp);
 		}
 
+		@Override
 		@ConditionalEvent("@conditionEvaluator.valid(#p0)")
 		public void handleRatio(Double ratio) {
 			collectEvent(ratio);

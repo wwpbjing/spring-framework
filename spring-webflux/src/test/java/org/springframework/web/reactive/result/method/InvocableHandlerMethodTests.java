@@ -23,7 +23,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -57,6 +57,9 @@ import static org.springframework.mock.http.server.reactive.test.MockServerHttpR
  * @author Juergen Hoeller
  */
 public class InvocableHandlerMethodTests {
+
+	private static final Duration TIMEOUT = Duration.ofSeconds(5);
+
 
 	private final MockServerWebExchange exchange = MockServerWebExchange.from(get("http://localhost:8080/path"));
 
@@ -177,7 +180,7 @@ public class InvocableHandlerMethodTests {
 		HandlerResult result = invokeForResult(new TestController(), method);
 
 		assertThat(result).as("Expected no result (i.e. fully handled)").isNull();
-		assertThat(this.exchange.getResponse().getBodyAsString().block(Duration.ZERO)).isEqualTo("body");
+		assertThat(this.exchange.getResponse().getBodyAsString().block(TIMEOUT)).isEqualTo("body");
 	}
 
 	@Test
@@ -197,7 +200,7 @@ public class InvocableHandlerMethodTests {
 		HandlerResult result = invokeForResult(new TestController(), method);
 
 		assertThat(result).as("Expected no result (i.e. fully handled)").isNull();
-		assertThat(this.exchange.getResponse().getBodyAsString().block(Duration.ZERO)).isEqualTo("body");
+		assertThat(this.exchange.getResponse().getBodyAsString().block(TIMEOUT)).isEqualTo("body");
 	}
 
 	@Test
